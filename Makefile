@@ -1,37 +1,71 @@
-# Alarm Clock — SystemVerilog Referencing Makefile
+# =============================================================================
+# Makefile — BCD Alarm Clock Professional RTL
 # =============================================================================
 # Targets:
-#   sim      — compile and simulate (requires Icarus Verilog: iverilog / vvp)
-#   wave     — open GTKWave after simulation
-#   clean    — remove generated files
+#   sim       Compile + run all 15 testbench cases (Icarus Verilog)
+#   wave      Open GTKWave after simulation
+#   lint      Run Verilator lint (static analysis, no simulation)
+#   clean     Remove build artefacts
+#
+# Prerequisites:
+#   iverilog  https://bleyer.org/icarus/
+#   vvp       (bundled with Icarus Verilog)
+#   gtkwave   https://gtkwave.sourceforge.net/  (optional, for waveforms)
+#   verilator https://www.veripool.org/verilator  (optional, for lint)
 #
 # Usage:
-#   make sim       # run all testbench simulations
-#   make wave      # view waveforms (GTKWave must be installed)
-#   make clean     # remove build artifacts
+#   make sim        # compile and run all tests
+#   make wave       # view waveforms in GTKWave
+#   make lint       # static analysis
+#   make clean      # remove build artefacts
 # =============================================================================
 
-SV_FILES = alarm_clock_sv.sv debounce.sv alarm_clock_tb.sv
+# ---- Tools ------------------------------------------------------------------
+IVERILOG  := iverilog
+VVP       := vvp
+GTKWAVE   := gtkwave
+VERILATOR := verilator
 
-SIM_BIN  = alarm_sim
-VCD_FILE = alarm_clock.vcd
+# ---- Source files -----------------------------------------------------------
+RTL_FILES := rtl/clk_enable_gen.sv   \
+             rtl/time_counter.sv      \
+             rtl/alarm_slot.sv        \
+             rtl/buzzer_ctrl.sv       \
+             rtl/control_fsm.sv      \
+             rtl/alarm_clock_core.sv \
+             rtl/debounce.sv         \
+             rtl/alarm_clock_top.sv
 
-# Icarus Verilog — SystemVerilog mode
-IVERILOG = iverilog -g2012 -D SIMULATION
-VVP      = vvp
+TB_FILES  := tb/alarm_clock_tb.sv
 
-.PHONY: sim wave clean
+# ---- Output files -----------------------------------------------------------
+SIM_BIN   := sim/alarm_sim
+VCD_FILE  := sim/alarm_clock.vcd
+
+# ---- Targets ----------------------------------------------------------------
+.PHONY: all sim wave lint clean
+
+all: sim
+
+# Create sim output directory
+$(SIM_BIN): $(RTL_FILES) $(TB_FILES) | sim/
+	$(IVERILOG) -g2012 -D SIMULATION \
+	    -o $@ \
+	    $(RTL_FILES) $(TB_FILES)
+
+sim/: ; mkdir -p sim
 
 sim: $(SIM_BIN)
 	$(VVP) $(SIM_BIN)
 
-$(SIM_BIN): $(SV_FILES)
-	$(IVERILOG) -o $@ $^
-
 wave: $(VCD_FILE)
-	gtkwave $(VCD_FILE) &
+	$(GTKWAVE) $(VCD_FILE) &
 
 $(VCD_FILE): sim
 
+lint:
+	$(VERILATOR) --lint-only -sv --Wall \
+	    $(RTL_FILES)
+
 clean:
-	rm -f $(SIM_BIN) $(VCD_FILE)
+	rm -rf sim/
