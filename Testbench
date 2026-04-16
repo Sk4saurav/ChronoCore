@@ -1,94 +1,299 @@
+// =============================================================================
+// Module  : Testbench
+// File    : Testbench
+// =============================================================================
+// Description:
+//   Comprehensive testbench for the improved Aclock module.
+//
+//   Improvements over original testbench:
+//     - wait(Alarm) replaced with timeout-guarded wait (no infinite hang)
+//     - $dumpfile / $dumpvars added for GTKWave waveform viewing
+//     - 7 test cases covering all critical paths:
+//         TC1  Reset — outputs clear to zero
+//         TC2  Invalid BCD input clamping — H=29 clamped to 23
+//         TC3  Load time and normal second-advance
+//         TC4  Rollover verification — 23:59:58 → 00:00:00
+//         TC5  Alarm trigger — edge-triggered single-shot
+//         TC6  STOP_al — alarm deasserts on pulse
+//         TC7  No re-trigger within same minute after stop
+//
+//   Simulation clock: 10 Hz (period = 100 ms in real time)
+//   CLK_DIV parameter of Aclock must match (default 10).
+// =============================================================================
+
+`timescale 1ns/1ps
+
 module Testbench;
 
- reg reset;
- reg clk;
- reg [1:0] H_in1;
- reg [3:0] H_in0;
- reg [3:0] M_in1;
- reg [3:0] M_in0;
- reg LD_time;
- reg LD_alarm;
- reg STOP_al;
- reg AL_ON;
+    // =========================================================================
+    // Simulation parameters
+    // =========================================================================
+    // CLK_PERIOD: 10 Hz clock → 100 ns half-period (100_000_000 ns full period)
+    // 1 simulated second = CLK_DIV = 10 clock cycles
+    localparam CLK_HALF  = 50_000_000;   // ns (10 Hz)
+    localparam CLK_DIV   = 10;           // must match Aclock parameter
 
- // Outputs
- wire Alarm;
- wire [1:0] H_out1;
- wire [3:0] H_out0;
- wire [3:0] M_out1;
- wire [3:0] M_out0;
- wire [3:0] S_out1;
- wire [3:0] S_out0;
+    // =========================================================================
+    // Signal Declarations
+    // =========================================================================
+    reg       reset;
+    reg       clk;
+    reg [1:0] H_in1;
+    reg [3:0] H_in0;
+    reg [3:0] M_in1;
+    reg [3:0] M_in0;
+    reg       LD_time;
+    reg       LD_alarm;
+    reg       STOP_al;
+    reg       AL_ON;
 
- 
- Aclock uut (
- .reset(reset), 
- .clk(clk), 
- .H_in1(H_in1), 
- .H_in0(H_in0), 
- .M_in1(M_in1), 
- .M_in0(M_in0), 
- .LD_time(LD_time), 
- .LD_alarm(LD_alarm), 
- .STOP_al(STOP_al), 
- .AL_ON(AL_ON), 
- .Alarm(Alarm), 
- .H_out1(H_out1), 
- .H_out0(H_out0), 
- .M_out1(M_out1), 
- .M_out0(M_out0), 
- .S_out1(S_out1), 
- .S_out0(S_out0)
- );
+    wire        Alarm;
+    wire [1:0]  H_out1;
+    wire [3:0]  H_out0;
+    wire [3:0]  M_out1;
+    wire [3:0]  M_out0;
+    wire [3:0]  S_out1;
+    wire [3:0]  S_out0;
 
- initial begin 
-  clk = 0;
-  forever #50000000 clk = ~clk;
- end
- initial begin
- // Initialize Inputs
- reset = 1;
- H_in1 = 1;
- H_in0 = 0;
- M_in1 = 1;
- M_in0 = 9;
- LD_time = 0;
- LD_alarm = 0;
- STOP_al = 0;
- AL_ON = 0;
+    // =========================================================================
+    // DUT Instantiation
+    // =========================================================================
+    Aclock #(.CLK_DIV(CLK_DIV)) uut (
+        .reset  (reset),
+        .clk    (clk),
+        .H_in1  (H_in1),
+        .H_in0  (H_in0),
+        .M_in1  (M_in1),
+        .M_in0  (M_in0),
+        .LD_time(LD_time),
+        .LD_alarm(LD_alarm),
+        .STOP_al(STOP_al),
+        .AL_ON  (AL_ON),
+        .Alarm  (Alarm),
+        .H_out1 (H_out1),
+        .H_out0 (H_out0),
+        .M_out1 (M_out1),
+        .M_out0 (M_out0),
+        .S_out1 (S_out1),
+        .S_out0 (S_out0)
+    );
 
- #1000000000;
- reset = 0;
- H_in1 = 1;
- H_in0 = 0;
- M_in1 = 2;
- M_in0 = 0;
- LD_time = 0;
- LD_alarm = 1;
- STOP_al = 0;
- AL_ON = 1; 
- 
+    // =========================================================================
+    // Clock Generation
+    // =========================================================================
+    initial clk = 0;
+    always #CLK_HALF clk = ~clk;
 
-#1000000000;
- reset = 0;
- H_in1 = 1;
- H_in0 = 0;
- M_in1 = 2;
- M_in0 = 0;
- LD_time = 0;
- LD_alarm = 0;
- STOP_al = 0;
- AL_ON = 1;
+    // =========================================================================
+    // Waveform Dump (open result with GTKWave: gtkwave sim.vcd)
+    // =========================================================================
+    initial begin
+        $dumpfile("sim.vcd");
+        $dumpvars(0, Testbench);
+    end
 
-wait(Alarm);
-#1000000000;
-#1000000000;
-#1000000000;
-#1000000000;
-#1000000000;
-#1000000000;
-STOP_al = 1;
+    // =========================================================================
+    // Helper Tasks
+    // =========================================================================
 
- 
- end
+    // Advance N simulated seconds (N * CLK_DIV clock edges)
+    task tick;
+        input integer n;
+        begin : tick_body
+            integer i;
+            for (i = 0; i < n * CLK_DIV; i = i + 1)
+                @(posedge clk);
+        end
+    endtask
+
+    // Apply and release synchronous reset
+    task do_reset;
+        begin
+            reset = 1;
+            tick(2);
+            reset = 0;
+            @(posedge clk);
+        end
+    endtask
+
+    // Load time — hold LD_time for 1 second then release
+    task load_time;
+        input [1:0] h1;
+        input [3:0] h0, m1, m0;
+        begin
+            H_in1 = h1; H_in0 = h0;
+            M_in1 = m1; M_in0 = m0;
+            LD_time = 1;
+            tick(1);
+            LD_time = 0;
+            @(posedge clk);
+        end
+    endtask
+
+    // Load alarm — hold LD_alarm for 1 second then release
+    task load_alarm;
+        input [1:0] h1;
+        input [3:0] h0, m1, m0;
+        begin
+            H_in1 = h1; H_in0 = h0;
+            M_in1 = m1; M_in0 = m0;
+            LD_alarm = 1;
+            tick(1);
+            LD_alarm = 0;
+            @(posedge clk);
+        end
+    endtask
+
+    // Wait for Alarm with a timeout — prevents infinite simulation hang
+    // Original testbench used bare wait(Alarm) which hangs forever if alarm
+    // never triggers due to a bug.
+    task wait_alarm;
+        input integer timeout_sec;
+        begin : wait_body
+            integer waited;
+            waited = 0;
+            while (!Alarm && waited < timeout_sec * CLK_DIV) begin
+                @(posedge clk);
+                waited = waited + 1;
+            end
+            if (!Alarm)
+                $display("  [ERROR] Alarm did not fire within %0d s", timeout_sec);
+        end
+    endtask
+
+    // Check helper — prints PASS or FAIL
+    task check;
+        input [255:0] name;   // test name
+        input         cond;   // condition expected to be true
+        begin
+            if (cond)
+                $display("  [PASS] %s", name);
+            else
+                $display("  [FAIL] %s  (time=%0t)", name, $time);
+        end
+    endtask
+
+    // Display current time for debugging
+    task show_time;
+        begin
+            $display("  [TIME] %0d%0d:%0d%0d:%0d%0d  Alarm=%b",
+                     H_out1, H_out0, M_out1, M_out0, S_out1, S_out0, Alarm);
+        end
+    endtask
+
+    // =========================================================================
+    // Counters
+    // =========================================================================
+    integer pass_cnt;
+    integer fail_cnt;
+
+    // =========================================================================
+    // Main Test Sequence
+    // =========================================================================
+    initial begin
+        // Initialise all inputs
+        reset   = 0;
+        LD_time = 0; LD_alarm = 0;
+        STOP_al = 0; AL_ON   = 0;
+        H_in1 = 0; H_in0 = 0;
+        M_in1 = 0; M_in0 = 0;
+        pass_cnt = 0;
+        fail_cnt = 0;
+
+        // =====================================================================
+        // TC1 — Reset Behaviour
+        // =====================================================================
+        $display("\n=== TC1: Reset ===");
+        do_reset;
+        tick(1);
+        check("Hour  = 00 after reset", H_out1 == 0 && H_out0 == 0);
+        check("Min   = 00 after reset", M_out1 == 0 && M_out0 == 0);
+        check("Sec   = 00 after reset", S_out1 == 0 && S_out0 == 0);
+        check("Alarm = 0  after reset", Alarm == 0);
+
+        // =====================================================================
+        // TC2 — BCD Input Validation (out-of-range clamped)
+        // =====================================================================
+        $display("\n=== TC2: BCD Input Validation ===");
+        do_reset;
+        load_time(2'd2, 4'd9, 4'd7, 4'd5);   // 29h 75m → should clamp to 23:59
+        tick(1);
+        check("29h clamped to 23", H_out1 == 2 && H_out0 == 3);
+        check("75m clamped to 59", M_out1 == 5 && M_out0 == 9);
+
+        // =====================================================================
+        // TC3 — Normal Timekeeping (seconds advance, minute rolls over)
+        // =====================================================================
+        $display("\n=== TC3: Normal Timekeeping ===");
+        do_reset;
+        load_time(2'd0, 4'd1, 4'd0, 4'd0);   // set 01:00:00
+        tick(5);
+        check("Second = 5 after 5 ticks", S_out1 == 0 && S_out0 == 5);
+        tick(55);   // total 60 s from load
+        check("Minute rolled to 01", M_out1 == 0 && M_out0 == 1);
+        check("Second reset to 00",  S_out1 == 0 && S_out0 == 0);
+
+        // =====================================================================
+        // TC4 — Midnight Rollover (23:59:58 → 00:00:00)
+        // =====================================================================
+        $display("\n=== TC4: Midnight Rollover ===");
+        do_reset;
+        load_time(2'd2, 4'd3, 4'd5, 4'd9);   // set 23:59:00
+        tick(62);   // 62 s → 00:00:02
+        show_time;
+        check("Hour rolled to 00",   H_out1 == 0 && H_out0 == 0);
+        check("Minute rolled to 00", M_out1 == 0 && M_out0 == 0);
+        check("Second = 02",         S_out1 == 0 && S_out0 == 2);
+
+        // =====================================================================
+        // TC5 — Alarm Trigger (edge-triggered: fires once at HH:MM:00)
+        // =====================================================================
+        $display("\n=== TC5: Alarm Trigger ===");
+        do_reset;
+        load_time(2'd0, 4'd2, 4'd0, 4'd0);    // time  = 02:00:00
+        load_alarm(2'd0, 4'd2, 4'd0, 4'd1);   // alarm = 02:01:00
+        AL_ON = 1;
+        wait_alarm(70);   // wait up to 70 s
+        check("Alarm triggered at 02:01:00", Alarm == 1);
+        show_time;
+
+        // =====================================================================
+        // TC6 — STOP_al Pulse Clears Alarm
+        // =====================================================================
+        $display("\n=== TC6: STOP_al ===");
+        STOP_al = 1;
+        tick(1);
+        STOP_al = 0;
+        tick(1);
+        check("Alarm deasserted after STOP_al pulse", Alarm == 0);
+
+        // =====================================================================
+        // TC7 — No Re-trigger Within Same Minute
+        // =====================================================================
+        $display("\n=== TC7: No Re-trigger Within Same Minute ===");
+        tick(30);   // still within alarm minute, 30 s after stop
+        check("Alarm stays LOW (edge detection prevents re-trigger)", Alarm == 0);
+        AL_ON = 0;
+
+        // =====================================================================
+        // Summary
+        // =====================================================================
+        $display("\n========================================");
+        $display(" ALL TESTBENCH CASES COMPLETED");
+        $display(" Review [PASS]/[FAIL] lines above.");
+        $display("========================================");
+        $finish;
+    end
+
+    // =========================================================================
+    // Watchdog — aborts simulation if it runs more than 1 simulated hour
+    // (prevents infinite hang caused by bugs that stall the test sequence)
+    // =========================================================================
+    initial begin
+        // 1 simulated hour = 3600 s × CLK_DIV cycles × (2×CLK_HALF ns)
+        #(3600.0 * CLK_DIV * 2 * CLK_HALF);
+        $display("[WATCHDOG] Simulation exceeded 1 simulated hour - aborting.");
+        $finish;
+    end
+
 endmodule
