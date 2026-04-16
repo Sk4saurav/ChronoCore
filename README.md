@@ -1,11 +1,12 @@
-# BCD Alarm Clock — Professional SystemVerilog RTL
+# ChronoCore — Professional BCD Alarm Clock (SystemVerilog RTL)
+
+> **`github.com/Sk4saurav/ChronoCore`**
 
 A professional-grade, fully modular BCD alarm clock implemented in
 SystemVerilog.  Designed for **FPGA synthesis** (Xilinx/Intel) and
 **simulation** (Icarus Verilog + GTKWave).
 
-> **Branch:** `feature/professional-rtl-redesign`
-> Original design preserved in `verilog code.v` and `Testbench` for reference.
+> Original student design preserved in `verilog code.v` and `Testbench` for reference.
 
 ---
 
